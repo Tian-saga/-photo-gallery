@@ -8,10 +8,12 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { Table } from 'aws-cdk-lib/aws-dynamodb';
 import { Duration } from 'aws-cdk-lib';
-import * as lambda from 'aws-cdk-lib/aws-lambda';                  // 新增
-import * as s3 from 'aws-cdk-lib/aws-s3';                          // 新增
-import * as snsSubs from 'aws-cdk-lib/aws-sns-subscriptions';      // 修改路径
+import * as lambda from 'aws-cdk-lib/aws-lambda';                 
+import * as s3 from 'aws-cdk-lib/aws-s3';                         
+import * as snsSubs from 'aws-cdk-lib/aws-sns-subscriptions';     
 import { FilterOrPolicy, SubscriptionFilter } from 'aws-cdk-lib/aws-sns';
+import * as eventSources from 'aws-cdk-lib/aws-lambda-event-sources';
+
 
 
 interface LambdasProps {
@@ -70,6 +72,9 @@ export class Lambdas extends Construct {
     });
     props.bucket.grantDelete(remover);
     props.dlq.grantConsumeMessages(remover);
+    remover.addEventSource(new eventSources.SqsEventSource(props.dlq));
+
+
 
     // Mailer 
     new lambdaPython.PythonFunction(this, 'MailerFn', {
