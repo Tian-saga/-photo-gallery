@@ -32,7 +32,7 @@ export class Lambdas extends Construct {
       environment: {
         BUCKET: props.bucket.bucketName,
         TABLE: props.table.tableName,
-        TOPIC_ARN: props.topic.topicArn
+        TOPIC: props.topic.topicArn
       }
     } as const;
 
