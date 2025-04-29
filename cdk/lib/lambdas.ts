@@ -72,8 +72,9 @@ export class Lambdas extends Construct {
     });
     props.bucket.grantDelete(remover);
     props.dlq.grantConsumeMessages(remover);
+    props.table.grantWriteData(remover);
     remover.addEventSource(new eventSources.SqsEventSource(props.dlq));
-
+  
 
 
     // Mailer 
