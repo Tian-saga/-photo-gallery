@@ -37,7 +37,7 @@ export class Lambdas extends Construct {
         BUCKET: props.bucket.bucketName,
         TABLE : props.table.tableName,
         TOPIC : props.topic.topicArn,
-        MAIL_FROM : 'noreply@example.com'   
+        MAIL_FROM : 'zhongzitian00@gmail.com'   
       }
     } as const;
 
@@ -70,6 +70,13 @@ export class Lambdas extends Construct {
       ...common,
     });
     props.table.grantWriteData(update);
+
+    
+    update.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['sns:Publish'],
+      resources: [props.topic.topicArn],
+    }));
+
 
     /* -------- Remove-Image -------- */
     const remover = new lambdaPython.PythonFunction(this, 'RemoveImageFn', {
