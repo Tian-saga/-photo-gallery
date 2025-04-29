@@ -16,10 +16,10 @@ export class PhotoStack extends Stack {
       bucket: storage.bucket,
       table: storage.table,
       topic: messaging.topic,
-      dlq: messaging.dlq
+      dlq: messaging.dlq,
+      uploadQ: messaging.uploadQ
     });
 
-    // 🔥 这两行就是输出
     new cdk.CfnOutput(this, 'ImagesBucketName', {
       value: storage.bucket.bucketName,
     });

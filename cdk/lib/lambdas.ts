@@ -1,113 +1,132 @@
 import { Construct } from 'constructs';
 import * as path from 'path';
 import * as lambdaPython from '@aws-cdk/aws-lambda-python-alpha';
-import * as lambdaDest from 'aws-cdk-lib/aws-lambda-destinations';
-import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
-import * as sns from 'aws-cdk-lib/aws-sns';
-import * as sqs from 'aws-cdk-lib/aws-sqs';
-import { Bucket } from 'aws-cdk-lib/aws-s3';
-import { Table } from 'aws-cdk-lib/aws-dynamodb';
-import { Duration } from 'aws-cdk-lib';
-import * as lambda from 'aws-cdk-lib/aws-lambda';                 
-import * as s3 from 'aws-cdk-lib/aws-s3';                         
-import * as snsSubs from 'aws-cdk-lib/aws-sns-subscriptions';     
-import { FilterOrPolicy, SubscriptionFilter } from 'aws-cdk-lib/aws-sns';
+import * as lambdaDest   from 'aws-cdk-lib/aws-lambda-destinations';
+import * as s3n          from 'aws-cdk-lib/aws-s3-notifications';
+import * as sns          from 'aws-cdk-lib/aws-sns';
+import * as snsSubs      from 'aws-cdk-lib/aws-sns-subscriptions';
+import { SubscriptionFilter } from 'aws-cdk-lib/aws-sns';
+import * as sqs          from 'aws-cdk-lib/aws-sqs';
+import * as lambda       from 'aws-cdk-lib/aws-lambda';
 import * as eventSources from 'aws-cdk-lib/aws-lambda-event-sources';
-
-
+import * as iam          from 'aws-cdk-lib/aws-iam';
+import { Bucket } from 'aws-cdk-lib/aws-s3';
+import { Table  } from 'aws-cdk-lib/aws-dynamodb';
+import { Duration } from 'aws-cdk-lib';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import { Queue  } from 'aws-cdk-lib/aws-sqs';
 
 interface LambdasProps {
   bucket: Bucket;
-  table: Table;
-  topic: sns.Topic;
-  dlq: sqs.Queue;
+  table : Table;
+  topic : sns.Topic;
+  dlq   : sqs.Queue;
+  uploadQ: Queue;
 }
 
 export class Lambdas extends Construct {
   constructor(scope: Construct, id: string, props: LambdasProps) {
     super(scope, id);
 
+  
     const common = {
-    runtime: lambda.Runtime.PYTHON_3_12,
-      timeout: Duration.seconds(15),
+      runtime : lambda.Runtime.PYTHON_3_12,
+      timeout : Duration.seconds(15),
       memorySize: 256,
       environment: {
         BUCKET: props.bucket.bucketName,
-        TABLE: props.table.tableName,
-        TOPIC: props.topic.topicArn
+        TABLE : props.table.tableName,
+        TOPIC : props.topic.topicArn,
+        MAIL_FROM : 'noreply@example.com'   
       }
     } as const;
 
-    // LogImage
+    /* -------- Log-Image -------- */
     const logImage = new lambdaPython.PythonFunction(this, 'LogImageFn', {
-      entry: path.join(__dirname, '../../lambdas/log-image'),
+      entry  : path.join(__dirname, '../../lambdas/log-image'),
       handler: 'handler',
       ...common,
-      onFailure: new lambdaDest.SqsDestination(props.dlq)
+      onFailure: new lambdaDest.SqsDestination(props.dlq),
     });
     props.bucket.grantRead(logImage);
-    props.table.grantWriteData(logImage);
+    props.table .grantWriteData(logImage);
 
-    // AddMetadata
+    logImage.addEventSource(
+        new eventSources.SqsEventSource(props.uploadQ)
+      );
+
+    /* -------- Add-Metadata -------- */
     const addMeta = new lambdaPython.PythonFunction(this, 'AddMetadataFn', {
-      entry: path.join(__dirname, '../../lambdas/add-metadata'),
+      entry  : path.join(__dirname, '../../lambdas/add-metadata'),
       handler: 'handler',
-      ...common
+      ...common,
     });
     props.table.grantWriteData(addMeta);
 
-    // UpdateStatus
+    /* -------- Update-Status -------- */
     const update = new lambdaPython.PythonFunction(this, 'UpdateStatusFn', {
-      entry: path.join(__dirname, '../../lambdas/update-status'),
+      entry  : path.join(__dirname, '../../lambdas/update-status'),
       handler: 'handler',
-      ...common
+      ...common,
     });
     props.table.grantWriteData(update);
 
-    // RemoveImage
+    /* -------- Remove-Image -------- */
     const remover = new lambdaPython.PythonFunction(this, 'RemoveImageFn', {
-      entry: path.join(__dirname, '../../lambdas/remove-image'),
+      entry  : path.join(__dirname, '../../lambdas/remove-image'),
       handler: 'handler',
-      ...common
+      ...common,
     });
     props.bucket.grantDelete(remover);
-    props.dlq.grantConsumeMessages(remover);
+    props.dlq  .grantConsumeMessages(remover);
     props.table.grantWriteData(remover);
     remover.addEventSource(new eventSources.SqsEventSource(props.dlq));
-  
 
-
-    // Mailer 
-    new lambdaPython.PythonFunction(this, 'MailerFn', {
-      entry: path.join(__dirname, '../../lambdas/mailer'),
+    /* -------- Mailer -------- */
+    const mailer = new lambdaPython.PythonFunction(this, 'MailerFn', {
+      entry  : path.join(__dirname, '../../lambdas/mailer'),
       handler: 'handler',
-      ...common
+      ...common,
     });
-
-    // S3 → LogImage
-    props.bucket.addEventNotification(
-        s3.EventType.OBJECT_CREATED,
-      new s3n.LambdaDestination(logImage)
-    );
-
-    // SNS → AddMetadata
-    props.topic.addSubscription(new snsSubs.LambdaSubscription(addMeta, {
-        filterPolicyWithMessageBody: {
-            metadata_type: FilterOrPolicy.filter(
-              SubscriptionFilter.stringFilter({
-                allowlist: ['Caption', 'Date', 'Name']
-              })
-            )
-          }
+  
+    mailer.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ses:SendEmail'],
+      resources: ['*'],
     }));
 
-    // SNS → UpdateStatus
-    props.topic.addSubscription(new snsSubs.LambdaSubscription(update, {
-        filterPolicyWithMessageBody: {
-            metadata_type: FilterOrPolicy.filter(
-              SubscriptionFilter.existsFilter()
-            )
-          }
+
+    /* S3 → LogImage */
+    props.bucket.addEventNotification(
+        s3.EventType.OBJECT_CREATED,          
+        new s3n.SqsDestination(props.uploadQ)
+      );
+
+    /* SNS → AddMetadata */
+    props.topic.addSubscription(
+        new snsSubs.LambdaSubscription(addMeta, {
+          filterPolicy: {
+            metadata_type: sns.SubscriptionFilter.stringFilter({
+                allowlist: ['Caption', 'Date', 'name', 'Email']
+            }),
+          },
+        }),
+      );
+      
+ /* ---------- SNS → UpdateStatus  ---------- */
+props.topic.addSubscription(
+    new snsSubs.LambdaSubscription(update, {
+      filterPolicy: {                                          
+        update_msg: sns.SubscriptionFilter.stringFilter({
+          allowlist: ['true']                                 
+        })
+      }
+    })
+  );
+    /* SNS → Mailer（mailer=true）*/
+    props.topic.addSubscription(new snsSubs.LambdaSubscription(mailer, {
+      filterPolicy: {
+        mailer: SubscriptionFilter.stringFilter({ allowlist: ['true'] }),
+      },
     }));
   }
 }
